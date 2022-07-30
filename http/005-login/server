@@ -117,7 +117,7 @@ function processRequest() {
 echo 'Listening on 3000...'
 
 while true; do
-  # Inifite loop
+  # Infinite loop
   # Create a TCP socket and close it at the end of every connection
   cat response | nc -lN 3000 | processRequest
 done

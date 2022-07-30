@@ -1,0 +1,8 @@
+#!/bin/bash
+
+echo 'Listening on 3000...'
+
+while true
+do
+  cat http/004-loop-server/response.html | nc -lN 3000
+done

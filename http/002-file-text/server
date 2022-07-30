@@ -1,0 +1,3 @@
+#!/bin/bash
+
+cat http/002-file-text/response.txt | nc -lvN 3000

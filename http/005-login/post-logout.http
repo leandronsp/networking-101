@@ -1,0 +1,3 @@
+HTTP/1.1 301
+Location: http://localhost:3000/
+Set-Cookie: {{cookie_name}}={{cookie_value}}; path=/; HttpOnly; Expires=Thu, 01 Jan 1970 00:00:00 GMT

@@ -1,0 +1,24 @@
+HTTP/1.1 200
+Content-Type: text/html
+
+<html>
+  <head>
+    <style>
+      section {
+        display: inline-block;
+        margin-left: 40%;
+        margin-top: 10%;
+      }
+    </style>
+  </head>
+
+  <body>
+    <section>
+      <p>Hello, {{name}}</p>
+
+      <form method="POST" action="/logout">
+        <input type="submit" value="Logout" />
+      </form>
+    </section>
+  </body>
+</html>

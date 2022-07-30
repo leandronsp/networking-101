@@ -1,0 +1,123 @@
+#!/bin/bash
+
+## Debugging `echo` inside functions will mess up with return values.
+## So we should create a new fd for debugging purposes and redirect it to the STDOUT
+exec 3>&1
+
+## Create the response FIFO
+rm -f response
+mkfifo response
+
+## fn: cleanup on EXIT
+function cleanup() {
+  rm response
+  exec 3>&- # close fd
+  echo -e "\nBye"
+  exit
+}
+trap cleanup EXIT
+
+## fn: render homepage
+function responseGetHome() {
+  COOKIE_NAME=$1
+  COOKIE_VALUE=$2
+  CONTENT_TYPE=$3
+
+  if [ "$COOKIE_NAME" != "name" ]; then
+    [ "$CONTENT_TYPE" != "application/text" ] && cat http/005-login/html/get-login.html
+    [ "$CONTENT_TYPE" = "application/text" ] && cat http/005-login/txt/get-login.txt
+  fi
+
+  if [ "$COOKIE_NAME" = "name" ]; then
+    [ "$CONTENT_TYPE" != "application/text" ] && cat http/005-login/html/get-home.html | sed "s/{{$COOKIE_NAME}}/$COOKIE_VALUE/"
+    [ "$CONTENT_TYPE" = "application/text" ] && cat http/005-login/txt/get-home.txt | sed "s/{{$COOKIE_NAME}}/$COOKIE_VALUE/"
+  fi
+}
+
+## fn: redirect after login
+function responsePostLogin() {
+  BODY_REGEX='(.*?)=(.*?)'
+  CONTENT_LENGTH=$1
+
+  while read -n$CONTENT_LENGTH -t1 body; do
+    KEY=$(echo $body | sed -E "s/$BODY_REGEX/\1/")
+    VALUE=$(echo $body | sed -E "s/$BODY_REGEX/\2/")
+  done
+
+  cat http/005-login/post-login.http | \
+    sed "s/{{cookie_name}}/$KEY/" | \
+    sed "s/{{cookie_value}}/$VALUE/"
+}
+
+## fn: redirect after logout
+function responsePostLogout() {
+  COOKIE_NAME=$1
+  COOKIE_VALUE=$2
+
+  cat http/005-login/post-logout.http | \
+    sed "s/{{cookie_name}}/$COOKIE_NAME/" | \
+    sed "s/{{cookie_value}}/$COOKIE_VALUE/"
+}
+
+## fn: render 404 page
+function responseNotFound() {
+  cat http/005-login/404.http
+}
+
+## fn: route request to the response
+function routeRequest() {
+  REQUEST=$1
+  COOKIE_NAME=$2
+  COOKIE_VALUE=$3
+  CONTENT_LENGTH=$4
+  CONTENT_TYPE=$5
+
+  [ "$REQUEST" = "GET /"        ] && responseGetHome    "$COOKIE_NAME" "$COOKIE_VALUE" "$CONTENT_TYPE"
+  [ "$REQUEST" = "POST /login"  ] && responsePostLogin  "$CONTENT_LENGTH"
+  [ "$REQUEST" = "POST /logout" ] && responsePostLogout "$COOKIE_NAME" "$COOKIE_VALUE"
+}
+
+## fn: read request, parse, route and send response
+function processRequest() {
+  REQUEST_REGEX='(GET|POST)\s(.*?)\sHTTP.*?'
+  COOKIE_REGEX='Cookie:\s(.*?)\=(.*?).*?'
+  CONTENT_LENGTH_REGEX='Content-Length:\s(.*?)'
+  CONTENT_TYPE_REGEX='Content-Type:\s(.*?)'
+
+  while read line; do
+    echo $line
+
+    # Trim line using delimiter \r\n
+    # Break loop until \r\n
+    trline=`echo $line | tr -d '[\r\n]'`
+    [ -z "$trline" ] && break
+
+    # Parse headline, e.g GET /home HTTP/1.1
+    [[ "$trline" =~ $REQUEST_REGEX ]] &&
+      REQUEST=`echo $trline | sed -E "s/$REQUEST_REGEX/\1 \2/"`
+
+    # Parse cookie header, e.g Cookie: name=Leandro
+    [[ "$trline" =~ $COOKIE_REGEX ]] &&
+      read COOKIE_NAME COOKIE_VALUE <<< `echo $trline | sed -E "s/$COOKIE_REGEX/\1 \2/"`
+
+    # Parse content-length header, e.g Content-Length: 42
+    [[ "$trline" =~ $CONTENT_LENGTH_REGEX ]] &&
+      CONTENT_LENGTH=`echo $trline | sed -E "s/$CONTENT_LENGTH_REGEX/\1/"`
+
+    # Parse content-type header, e.g Content-Type: text/html
+    [[ "$trline" =~ $CONTENT_TYPE_REGEX ]] &&
+      CONTENT_TYPE=`echo $trline | sed -E "s/$CONTENT_TYPE_REGEX/\1/"`
+  done
+
+  RESPONSE=`routeRequest "$REQUEST" "$COOKIE_NAME" "$COOKIE_VALUE" "$CONTENT_LENGTH" "$CONTENT_TYPE"`
+  echo "$RESPONSE" > response
+}
+
+## Listen to TCP connections using netcat
+echo 'Listening on 3000...'
+
+while true; do
+  # Inifite loop
+  # Create a TCP socket and close it at the end of every connection
+  cat response | nc -lN 3000 | processRequest
+done

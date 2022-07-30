@@ -1,0 +1,73 @@
+#!/bin/bash
+
+function readResponse() {
+  # Read HTTP response until \r\n
+  while read -u 3 line; do
+    echo $line
+
+    trline=`echo $line | tr -d '[\r\n]'`
+    [ -z "$trline" ] && break
+
+    SET_COOKIE_REGEX='Set-Cookie:\s(.*?)\=(.*?);\spath\=\/;\sHttpOnly$'
+
+    [[ "$trline" =~ $SET_COOKIE_REGEX ]] &&
+      read COOKIE_NAME COOKIE_VALUE <<< `echo $trline | sed -E "s/$SET_COOKIE_REGEX/\1 \2/"`
+  done
+}
+
+function readBody() {
+  # Read remaining HTTP response body
+  while read -u 3 -n 1024 line; do
+    echo $line
+
+    RESPONSE="$line"
+  done
+}
+
+function logout() {
+  exec 3<> /dev/tcp/localhost/3000
+  echo -e "POST /logout HTTP/1.1\r\nCookie: $COOKIE_NAME=$COOKIE_VALUE\r\n\r\n" >&3
+
+  readResponse
+
+  unset COOKIE_NAME
+  unset COOKIE_VALUE
+}
+
+function login() {
+  exec 3<> /dev/tcp/localhost/3000
+  echo -e "POST /login HTTP/1.1\r\nContent-Length: 1024\r\n\r\nname=$NAME" >&3
+
+  readResponse
+}
+
+function menu() {
+  exec 3<> /dev/tcp/localhost/3000
+
+  if [ "$COOKIE_NAME" = "name" ]; then
+    echo -e "GET / HTTP/1.1\r\nContent-Type: application/text\r\nCookie: $COOKIE_NAME=$COOKIE_VALUE\r\n\r\n" >&3
+
+    readResponse
+    readBody
+
+    echo 'Deseja fazer logout? (s/n/q):'
+    read option
+
+    [ "$option" = "s" ] && logout
+    [ "$option" = "q" ] && echo 3>&- && echo 3<&- && echo Bye && exit
+
+    menu
+  else
+    echo -e 'GET / HTTP/1.1\r\nContent-Type: application/text\r\n\r\n' >&3
+
+    readResponse
+    readBody
+
+    read NAME
+
+    login
+    menu
+  fi
+}
+
+menu
